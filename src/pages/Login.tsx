@@ -1,34 +1,123 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield, Camera, Lock } from "lucide-react";
+import { Shield, Lock } from "lucide-react";
+import { signIn } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [email, setEmail] = useState("");
-  const [isFaceScanning, setIsFaceScanning] = useState(false);
+  const [password, setPassword] = useState("");
   const [showOTP, setShowOTP] = useState(false);
   const [otp, setOtp] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleEmailSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    // Check if already logged in
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        navigate("/dashboard");
+      }
+    });
+  }, [navigate]);
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email) {
-      setIsFaceScanning(true);
-      // Simulate face scan
-      setTimeout(() => {
-        setIsFaceScanning(false);
-        setShowOTP(true);
-      }, 2000);
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await signIn(email, password);
+
+      if (error) {
+        toast({
+          title: "Login Failed",
+          description: error.message || "Invalid email or password",
+          variant: "destructive"
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      if (data?.session) {
+        // Check if user has enrolled 2FA
+        const { data: authData } = await supabase
+          .from('auth_data')
+          .select('face_enrolled, totp_verified')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+
+        if (authData?.face_enrolled) {
+          // Proceed to OTP verification
+          setShowOTP(true);
+          toast({
+            title: "Face verified",
+            description: "Please enter your authenticator code",
+          });
+        } else {
+          // No 2FA setup, redirect directly
+          navigate("/dashboard");
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred",
+        variant: "destructive"
+      });
     }
+    
+    setIsLoading(false);
   };
 
-  const handleOTPSubmit = (e: React.FormEvent) => {
+  const handleOTPSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp.length === 6) {
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-totp', {
+        body: { token: otp }
+      });
+
+      if (error || !data?.valid) {
+        toast({
+          title: "Invalid Code",
+          description: "Please check your authenticator and try again",
+          variant: "destructive"
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      // Log successful login
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('audit_logs').insert({
+          user_id: user.id,
+          action: 'login_success',
+          details: 'Successful login with 2FA'
+        });
+      }
+
+      toast({
+        title: "Success",
+        description: "Login successful!",
+      });
+      
       navigate("/dashboard");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Verification failed",
+        variant: "destructive"
+      });
     }
+    
+    setIsLoading(false);
   };
 
   return (
@@ -49,7 +138,7 @@ const Login = () => {
             <CardTitle>Company Login</CardTitle>
             <CardDescription>
               {!showOTP 
-                ? "Enter your email to begin authentication" 
+                ? "Enter your credentials to begin" 
                 : "Enter the code from your authenticator app"}
             </CardDescription>
           </CardHeader>
@@ -71,21 +160,27 @@ const Login = () => {
                   />
                 </div>
 
-                {isFaceScanning && (
-                  <div className="bg-secondary rounded-lg p-6 text-center space-y-3">
-                    <Camera className="h-12 w-12 mx-auto text-primary animate-pulse" />
-                    <p className="text-sm text-muted-foreground">
-                      Scanning face biometrics...
-                    </p>
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium">
+                    Password
+                  </label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="h-12"
+                  />
+                </div>
 
                 <Button 
                   type="submit" 
                   className="w-full h-12"
-                  disabled={isFaceScanning}
+                  disabled={isLoading}
                 >
-                  {isFaceScanning ? "Scanning..." : "Continue"}
+                  {isLoading ? "Verifying..." : "Continue"}
                 </Button>
               </form>
             ) : (
@@ -106,8 +201,12 @@ const Login = () => {
                   />
                 </div>
 
-                <Button type="submit" className="w-full h-12">
-                  Verify & Login
+                <Button 
+                  type="submit" 
+                  className="w-full h-12"
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Verifying..." : "Verify & Login"}
                 </Button>
               </form>
             )}

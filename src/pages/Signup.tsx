@@ -1,31 +1,138 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Shield, Camera, QrCode, CheckCircle2 } from "lucide-react";
+import { signUp, generateTOTPSecret } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const Signup = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
+  const [qrCodeUrl, setQrCodeUrl] = useState("");
+  const [totpSecret, setTotpSecret] = useState("");
+  const [faceData, setFaceData] = useState("");
+  const [isCapturing, setIsCapturing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const handleStep1 = (e: React.FormEvent) => {
+  const handleStep1 = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStep(2);
+    
+    // Create user account
+    const { data, error } = await signUp({ email, password, fullName: name });
+    
+    if (error) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create account",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (data?.user) {
+      // Create profile
+      await supabase.from('profiles').insert({
+        user_id: data.user.id,
+        email,
+        full_name: name
+      });
+      
+      setStep(2);
+    }
   };
 
-  const handleStep2 = () => {
-    // Simulate face capture
-    setTimeout(() => setStep(3), 1500);
+  const startFaceCapture = async () => {
+    setIsCapturing(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+    } catch (error) {
+      toast({
+        title: "Camera Error",
+        description: "Could not access camera. Please allow camera permissions.",
+        variant: "destructive"
+      });
+      setIsCapturing(false);
+    }
   };
 
-  const handleStep3 = (e: React.FormEvent) => {
+  const captureFace = async () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+        context.drawImage(videoRef.current, 0, 0);
+        
+        const imageData = canvasRef.current.toDataURL('image/jpeg');
+        setFaceData(imageData);
+        
+        // Stop camera stream
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        
+        // Generate TOTP secret
+        const { data, error } = await generateTOTPSecret();
+        
+        if (error || !data) {
+          toast({
+            title: "Error",
+            description: "Failed to generate authenticator secret",
+            variant: "destructive"
+          });
+          return;
+        }
+        
+        setQrCodeUrl(data.qrCodeUrl);
+        setTotpSecret(data.secret);
+        
+        // Save auth data
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('auth_data').insert({
+            user_id: user.id,
+            totp_secret: data.secret,
+            face_template: imageData,
+            face_enrolled: true,
+            totp_verified: false
+          });
+        }
+        
+        setStep(3);
+      }
+    }
+  };
+
+  const handleStep3 = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (otp.length === 6) {
+      // Verify TOTP
+      const { data, error } = await supabase.functions.invoke('verify-totp', {
+        body: { token: otp }
+      });
+      
+      if (error || !data?.valid) {
+        toast({
+          title: "Invalid Code",
+          description: "Please check your authenticator app and try again",
+          variant: "destructive"
+        });
+        return;
+      }
+      
       setStep(4);
       setTimeout(() => navigate("/login"), 2000);
     }
@@ -97,6 +204,7 @@ const Signup = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    minLength={6}
                     className="h-11"
                   />
                 </div>
@@ -108,29 +216,58 @@ const Signup = () => {
 
             {step === 2 && (
               <div className="space-y-4">
-                <div className="bg-secondary rounded-lg p-8 text-center space-y-4">
-                  <Camera className="h-16 w-16 mx-auto text-primary animate-pulse" />
-                  <div>
-                    <p className="font-medium text-foreground">Position your face</p>
-                    <p className="text-sm text-muted-foreground">
-                      Look directly at the camera
-                    </p>
-                  </div>
+                <div className="bg-secondary rounded-lg p-6 text-center space-y-4">
+                  {!isCapturing ? (
+                    <>
+                      <Camera className="h-16 w-16 mx-auto text-primary" />
+                      <div>
+                        <p className="font-medium text-foreground">Capture your face</p>
+                        <p className="text-sm text-muted-foreground">
+                          We'll use this for biometric authentication
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="relative">
+                      <video 
+                        ref={videoRef} 
+                        className="w-full rounded-lg"
+                        playsInline
+                      />
+                      <canvas ref={canvasRef} className="hidden" />
+                    </div>
+                  )}
                 </div>
-                <Button onClick={handleStep2} className="w-full h-11">
-                  Capture Face
-                </Button>
+                {!isCapturing ? (
+                  <Button onClick={startFaceCapture} className="w-full h-11">
+                    <Camera className="mr-2 h-4 w-4" />
+                    Start Camera
+                  </Button>
+                ) : (
+                  <Button onClick={captureFace} className="w-full h-11">
+                    Capture Face
+                  </Button>
+                )}
               </div>
             )}
 
             {step === 3 && (
               <form onSubmit={handleStep3} className="space-y-4">
                 <div className="bg-secondary rounded-lg p-6 text-center space-y-4">
-                  <QrCode className="h-24 w-24 mx-auto text-foreground" />
+                  {qrCodeUrl && (
+                    <img 
+                      src={qrCodeUrl} 
+                      alt="QR Code" 
+                      className="w-64 h-64 mx-auto bg-white p-2 rounded-lg"
+                    />
+                  )}
                   <div className="space-y-2">
                     <p className="font-medium text-foreground">Scan with Microsoft Authenticator</p>
                     <p className="text-sm text-muted-foreground">
                       Open your authenticator app and scan this QR code
+                    </p>
+                    <p className="text-xs text-muted-foreground font-mono bg-background p-2 rounded break-all">
+                      {totpSecret}
                     </p>
                   </div>
                 </div>

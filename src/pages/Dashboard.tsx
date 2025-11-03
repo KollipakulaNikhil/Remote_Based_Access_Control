@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,17 +19,75 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { supabase } from "@/integrations/supabase/client";
+import { signOut } from "@/lib/auth";
+import { useToast } from "@/hooks/use-toast";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [userName] = useState("John Doe");
+  const { toast } = useToast();
+  const [userName, setUserName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    // Check authentication
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        navigate("/login");
+        return;
+      }
+
+      // Get user profile
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            setUserName(data.full_name || "User");
+            setUserEmail(data.email);
+          }
+        });
+
+      // Get audit logs
+      supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(5)
+        .then(({ data }) => {
+          if (data) {
+            setAuditLogs(data);
+          }
+        });
+    });
+  }, [navigate]);
+
+  const handleLogout = async () => {
+    await signOut();
+    toast({
+      title: "Logged out",
+      description: "You have been successfully logged out",
+    });
     navigate("/login");
   };
 
   const handleSettings = () => {
     navigate("/settings");
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    return `${Math.floor(seconds / 86400)} days ago`;
   };
 
   return (
@@ -62,7 +120,7 @@ const Dashboard = () => {
                 <DropdownMenuContent align="end" className="w-56">
                   <div className="px-2 py-1.5">
                     <p className="text-sm font-medium">{userName}</p>
-                    <p className="text-xs text-muted-foreground">john.doe@company.com</p>
+                    <p className="text-xs text-muted-foreground">{userEmail}</p>
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSettings}>
@@ -145,24 +203,19 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  { action: "Login via face recognition", time: "2 minutes ago", status: "success" },
-                  { action: "Password updated", time: "3 days ago", status: "success" },
-                  { action: "Face template re-enrolled", time: "1 week ago", status: "success" },
-                  { action: "Login attempt blocked", time: "2 weeks ago", status: "warning" },
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center justify-between py-3 border-b last:border-0">
+                {auditLogs.length > 0 ? auditLogs.map((log) => (
+                  <div key={log.id} className="flex items-center justify-between py-3 border-b last:border-0">
                     <div className="flex items-center gap-3">
-                      <div className={`h-2 w-2 rounded-full ${
-                        item.status === "success" ? "bg-success" : "bg-warning"
-                      }`} />
+                      <div className="h-2 w-2 rounded-full bg-success" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">{item.action}</p>
-                        <p className="text-xs text-muted-foreground">{item.time}</p>
+                        <p className="text-sm font-medium text-foreground">{log.action.replace(/_/g, ' ')}</p>
+                        <p className="text-xs text-muted-foreground">{formatTimeAgo(log.created_at)}</p>
                       </div>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">No recent activity</p>
+                )}
               </div>
             </CardContent>
           </Card>
