@@ -45,6 +45,12 @@ const Signup = () => {
         email,
         full_name: name
       });
+
+      // Assign default 'user' role
+      await supabase.from('user_roles').insert({
+        user_id: data.user.id,
+        role: 'user'
+      });
       
       setStep(2);
     }

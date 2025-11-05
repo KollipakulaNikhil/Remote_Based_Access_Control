@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { 
   Shield, 
   LogOut, 
@@ -25,9 +26,11 @@ import { useToast } from "@/hooks/use-toast";
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState<string>("");
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   useEffect(() => {
@@ -48,6 +51,20 @@ const Dashboard = () => {
           if (data) {
             setUserName(data.full_name || "User");
             setUserEmail(data.email);
+          }
+        });
+
+      // Get user role
+      supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            setUserRole(data.role);
+          } else {
+            setUserRole('user');
           }
         });
 
@@ -104,9 +121,16 @@ const Dashboard = () => {
             </div>
 
             <div className="flex items-center gap-4">
-              <span className="text-sm text-muted-foreground hidden sm:inline">
-                Welcome back, {userName}
-              </span>
+              <div className="hidden sm:flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Welcome back, {userName}
+                </span>
+                {userRole && (
+                  <Badge variant={userRole === 'admin' ? 'destructive' : userRole === 'employee' ? 'default' : 'secondary'}>
+                    {userRole.toUpperCase()}
+                  </Badge>
+                )}
+              </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="rounded-full">
@@ -143,8 +167,23 @@ const Dashboard = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-6">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">Monitor your account activity and security</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-foreground">
+                {userRole === 'admin' ? 'Admin Control Panel' : 
+                 userRole === 'employee' ? 'Employee Dashboard' : 
+                 'User Dashboard'}
+              </h1>
+              {userRole && (
+                <Badge variant={userRole === 'admin' ? 'destructive' : userRole === 'employee' ? 'default' : 'secondary'} className="text-sm">
+                  {userRole.toUpperCase()}
+                </Badge>
+              )}
+            </div>
+            <p className="text-muted-foreground mt-1">
+              {userRole === 'admin' ? 'Full system access and control' :
+               userRole === 'employee' ? 'Monitor your work and team activity' :
+               'Monitor your account activity and security'}
+            </p>
           </div>
 
           {/* Stats Grid */}
@@ -167,14 +206,16 @@ const Dashboard = () => {
             <Card className="border-border shadow-card hover:shadow-elevated transition-all">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Performance
+                  {userRole === 'admin' ? 'Total Users' : 'Performance'}
                 </CardTitle>
                 <TrendingUp className="h-5 w-5 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">98.5%</div>
+                <div className="text-2xl font-bold text-foreground">
+                  {userRole === 'admin' ? '156' : '98.5%'}
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  System uptime this month
+                  {userRole === 'admin' ? 'Active in the system' : 'System uptime this month'}
                 </p>
               </CardContent>
             </Card>
@@ -182,14 +223,16 @@ const Dashboard = () => {
             <Card className="border-border shadow-card hover:shadow-elevated transition-all">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Activity
+                  {userRole === 'admin' ? 'System Health' : 'Activity'}
                 </CardTitle>
                 <Activity className="h-5 w-5 text-accent" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">24</div>
+                <div className="text-2xl font-bold text-foreground">
+                  {userRole === 'admin' ? '99.9%' : '24'}
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Logins this week
+                  {userRole === 'admin' ? 'All services operational' : 'Logins this week'}
                 </p>
               </CardContent>
             </Card>
@@ -239,8 +282,16 @@ const Dashboard = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Account Type</span>
-                    <span className="font-medium">Standard User</span>
+                    <Badge variant={userRole === 'admin' ? 'destructive' : userRole === 'employee' ? 'default' : 'secondary'}>
+                      {userRole ? userRole.toUpperCase() : 'USER'}
+                    </Badge>
                   </div>
+                  {userRole === 'admin' && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Privileges</span>
+                      <span className="font-medium text-destructive">Full Access</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

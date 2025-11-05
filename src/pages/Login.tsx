@@ -51,6 +51,13 @@ const Login = () => {
           .eq('user_id', data.user.id)
           .maybeSingle();
 
+        // Fetch user role
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+
         if (authData?.face_enrolled) {
           // Proceed to OTP verification
           setShowOTP(true);
@@ -60,7 +67,7 @@ const Login = () => {
           });
         } else {
           // No 2FA setup, redirect directly
-          navigate("/dashboard");
+          navigate("/dashboard", { state: { role: roleData?.role || 'user' } });
         }
       }
     } catch (error) {
@@ -93,7 +100,7 @@ const Login = () => {
         return;
       }
 
-      // Log successful login
+      // Fetch user and log successful login
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         await supabase.from('audit_logs').insert({
@@ -102,13 +109,18 @@ const Login = () => {
           details: 'Successful login with 2FA'
         });
       }
+      const { data: roleData } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', user!.id)
+        .maybeSingle();
 
       toast({
         title: "Success",
         description: "Login successful!",
       });
       
-      navigate("/dashboard");
+      navigate("/dashboard", { state: { role: roleData?.role || 'user' } });
     } catch (error) {
       toast({
         title: "Error",
