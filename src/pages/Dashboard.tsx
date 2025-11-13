@@ -10,7 +10,9 @@ import {
   TrendingUp, 
   Activity, 
   CheckCircle2,
-  User
+  User,
+  Users,
+  Lock
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,6 +34,12 @@ const Dashboard = () => {
   const [userEmail, setUserEmail] = useState("");
   const [userRole, setUserRole] = useState<string>("");
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [userCounts, setUserCounts] = useState({ 
+    admins: 0, 
+    employees: 0, 
+    users: 0,
+    totalActive: 0 
+  });
 
   useEffect(() => {
     // Check authentication
@@ -54,19 +62,49 @@ const Dashboard = () => {
           }
         });
 
-      // Get user role
+      // Get user role and check status
       supabase
         .from('user_roles')
-        .select('role')
+        .select('role, status')
         .eq('user_id', session.user.id)
         .maybeSingle()
         .then(({ data }) => {
           if (data) {
+            // Check if user is blocked or fired
+            if (data.status !== 'active') {
+              const statusMessage = data.status === 'fired' 
+                ? 'Your account has been terminated.' 
+                : 'Your account has been blocked.';
+              
+              toast({
+                title: "Access Denied",
+                description: statusMessage,
+                variant: "destructive",
+              });
+              supabase.auth.signOut();
+              navigate("/login");
+              return;
+            }
             setUserRole(data.role);
           } else {
             setUserRole('user');
           }
         });
+
+      // Fetch user counts
+      supabase.rpc('get_user_counts').then(({ data: counts }) => {
+        if (counts) {
+          const countsMap = counts.reduce((acc: any, item: any) => {
+            if (item.status === 'active') {
+              acc[item.role + 's'] = Number(item.count);
+              acc.totalActive += Number(item.count);
+            }
+            return acc;
+          }, { admins: 0, employees: 0, users: 0, totalActive: 0 });
+          
+          setUserCounts(countsMap);
+        }
+      });
 
       // Get audit logs
       supabase
@@ -151,6 +189,12 @@ const Dashboard = () => {
                     <Settings className="mr-2 h-4 w-4" />
                     Settings
                   </DropdownMenuItem>
+                  {userRole === 'admin' && (
+                    <DropdownMenuItem onClick={() => navigate("/admin")}>
+                      <Shield className="mr-2 h-4 w-4" />
+                      Admin Panel
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                     <LogOut className="mr-2 h-4 w-4" />
@@ -187,18 +231,18 @@ const Dashboard = () => {
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card className="border-border shadow-card hover:shadow-elevated transition-all">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Security Status
+                  Total Active Users
                 </CardTitle>
-                <CheckCircle2 className="h-5 w-5 text-success" />
+                <Users className="h-5 w-5 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">Active</div>
+                <div className="text-2xl font-bold text-foreground">{userCounts.totalActive}</div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  2FA enabled and verified
+                  All active accounts
                 </p>
               </CardContent>
             </Card>
@@ -206,16 +250,14 @@ const Dashboard = () => {
             <Card className="border-border shadow-card hover:shadow-elevated transition-all">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {userRole === 'admin' ? 'Total Users' : 'Performance'}
+                  Employees
                 </CardTitle>
-                <TrendingUp className="h-5 w-5 text-primary" />
+                <Activity className="h-5 w-5 text-success" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">
-                  {userRole === 'admin' ? '156' : '98.5%'}
-                </div>
+                <div className="text-2xl font-bold text-foreground">{userCounts.employees}</div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {userRole === 'admin' ? 'Active in the system' : 'System uptime this month'}
+                  Active employees
                 </p>
               </CardContent>
             </Card>
@@ -223,16 +265,29 @@ const Dashboard = () => {
             <Card className="border-border shadow-card hover:shadow-elevated transition-all">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {userRole === 'admin' ? 'System Health' : 'Activity'}
+                  Administrators
                 </CardTitle>
-                <Activity className="h-5 w-5 text-accent" />
+                <Shield className="h-5 w-5 text-destructive" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">
-                  {userRole === 'admin' ? '99.9%' : '24'}
-                </div>
+                <div className="text-2xl font-bold text-foreground">{userCounts.admins}</div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {userRole === 'admin' ? 'All services operational' : 'Logins this week'}
+                  System administrators
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border shadow-card hover:shadow-elevated transition-all">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Regular Users
+                </CardTitle>
+                <Lock className="h-5 w-5 text-accent" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-foreground">{userCounts.users}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Standard user accounts
                 </p>
               </CardContent>
             </Card>
