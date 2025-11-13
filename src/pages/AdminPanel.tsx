@@ -52,12 +52,11 @@ const AdminPanel = () => {
       // Check if user is admin
       const { data: roleData } = await supabase
         .from('user_roles')
-        .select('role')
+        .select('role, status')
         .eq('user_id', user.id)
-        .eq('status', 'active')
-        .maybeSingle();
+        .maybeSingle() as any;
 
-      if (!roleData || roleData.role !== 'admin') {
+      if (!roleData || roleData.role !== 'admin' || (roleData.status && roleData.status !== 'active')) {
         toast({
           title: "Access Denied",
           description: "You don't have permission to access this page.",
@@ -69,33 +68,39 @@ const AdminPanel = () => {
 
       setIsAdmin(true);
 
-      // Fetch all users with their roles and profiles
-      const { data, error } = await supabase
+      // Fetch all user roles (with status column from migration)
+      const { data: rolesData, error: rolesError } = await supabase
         .from('user_roles')
-        .select(`
-          id,
-          user_id,
-          role,
-          status,
-          created_at,
-          profiles (
-            email,
-            full_name
-          )
-        `)
-        .order('created_at', { ascending: false });
+        .select('id, user_id, role, status, created_at');
 
-      if (error) throw error;
+      if (rolesError) throw rolesError;
 
-      const formattedUsers = data?.map((item: any) => ({
-        id: item.id,
-        user_id: item.user_id,
-        email: item.profiles?.email || 'N/A',
-        full_name: item.profiles?.full_name,
-        role: item.role,
-        status: item.status,
-        created_at: item.created_at
-      })) || [];
+      // Fetch all profiles
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('user_id, email, full_name');
+
+      if (profilesError) throw profilesError;
+
+      // Create a map of profiles by user_id for quick lookup
+      const profilesMap: Record<string, any> = {};
+      profilesData?.forEach(profile => {
+        profilesMap[profile.user_id] = profile;
+      });
+
+      // Combine the data
+      const formattedUsers = (rolesData as any)?.map((roleItem: any) => {
+        const profile = profilesMap[roleItem.user_id];
+        return {
+          id: roleItem.id,
+          user_id: roleItem.user_id,
+          email: profile?.email || 'N/A',
+          full_name: profile?.full_name || null,
+          role: roleItem.role,
+          status: roleItem.status || 'active',
+          created_at: roleItem.created_at
+        };
+      }) || [];
 
       setUsers(formattedUsers);
     } catch (error) {
@@ -114,7 +119,7 @@ const AdminPanel = () => {
     try {
       const { error } = await supabase
         .from('user_roles')
-        .update({ status: newStatus })
+        .update({ status: newStatus } as any)
         .eq('user_id', userId);
 
       if (error) throw error;
