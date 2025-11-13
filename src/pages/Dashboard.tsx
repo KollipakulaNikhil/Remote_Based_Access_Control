@@ -68,10 +68,10 @@ const Dashboard = () => {
         .select('role, status')
         .eq('user_id', session.user.id)
         .maybeSingle()
-        .then(({ data }) => {
+        .then(({ data }: any) => {
           if (data) {
             // Check if user is blocked or fired
-            if (data.status !== 'active') {
+            if (data.status && data.status !== 'active') {
               const statusMessage = data.status === 'fired' 
                 ? 'Your account has been terminated.' 
                 : 'Your account has been blocked.';
@@ -92,7 +92,7 @@ const Dashboard = () => {
         });
 
       // Fetch user counts
-      supabase.rpc('get_user_counts').then(({ data: counts }) => {
+      supabase.rpc('get_user_counts' as any).then(({ data: counts }: any) => {
         if (counts) {
           const countsMap = counts.reduce((acc: any, item: any) => {
             if (item.status === 'active') {
