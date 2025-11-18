@@ -114,18 +114,21 @@ export type Database = {
           created_at: string | null
           id: string
           role: Database["public"]["Enums"]["app_role"]
+          status: string
           user_id: string
         }
         Insert: {
           created_at?: string | null
           id?: string
           role: Database["public"]["Enums"]["app_role"]
+          status?: string
           user_id: string
         }
         Update: {
           created_at?: string | null
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          status?: string
           user_id?: string
         }
         Relationships: []
@@ -135,6 +138,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_user_counts: {
+        Args: never
+        Returns: {
+          count: number
+          role: Database["public"]["Enums"]["app_role"]
+          status: string
+        }[]
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]

@@ -124,9 +124,15 @@ const AdminPanel = () => {
 
       if (error) throw error;
 
+      const actionMessage = newStatus === 'active' 
+        ? 'reactivated' 
+        : newStatus === 'fired' 
+        ? 'fired' 
+        : 'blocked';
+
       toast({
         title: "Success",
-        description: `User ${newStatus === 'fired' ? 'fired' : 'blocked'} successfully.`
+        description: `User ${actionMessage} successfully.`
       });
 
       // Refresh the users list
@@ -138,7 +144,7 @@ const AdminPanel = () => {
         await supabase.from('audit_logs').insert({
           user_id: user.id,
           action: `${newStatus}_user`,
-          details: `${userRole} user ${userId} was ${newStatus}`
+          details: `${userRole} user ${userId} was ${actionMessage}`
         });
       }
     } catch (error) {
@@ -230,44 +236,66 @@ const AdminPanel = () => {
                       {new Date(user.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      {user.status === 'active' && user.role !== 'admin' && (
+                      {user.role !== 'admin' && (
                         <div className="flex gap-2 justify-end">
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                disabled={user.role === 'admin'}
-                              >
-                                {user.role === 'employee' ? (
-                                  <><UserX className="h-4 w-4 mr-1" /> Fire</>
-                                ) : (
-                                  <><Ban className="h-4 w-4 mr-1" /> Block</>
-                                )}
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will {user.role === 'employee' ? 'fire' : 'block'} {user.full_name || user.email}.
-                                  They will no longer be able to access the system.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleStatusChange(
-                                    user.user_id, 
-                                    user.role,
-                                    user.role === 'employee' ? 'fired' : 'blocked'
+                          {user.status === 'active' ? (
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="outline" size="sm">
+                                  {user.role === 'employee' ? (
+                                    <><UserX className="h-4 w-4 mr-1" /> Fire</>
+                                  ) : (
+                                    <><Ban className="h-4 w-4 mr-1" /> Block</>
                                   )}
-                                >
-                                  Confirm
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will {user.role === 'employee' ? 'fire' : 'block'} {user.full_name || user.email}.
+                                    They will no longer be able to access the system.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => handleStatusChange(
+                                      user.user_id, 
+                                      user.role,
+                                      user.role === 'employee' ? 'fired' : 'blocked'
+                                    )}
+                                  >
+                                    Confirm
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          ) : (
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="default" size="sm">
+                                  Reactivate
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Reactivate User</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will reactivate {user.full_name || user.email} and restore their access to the system.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => handleStatusChange(user.user_id, user.role, 'active')}
+                                  >
+                                    Confirm
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          )}
                         </div>
                       )}
                     </TableCell>
