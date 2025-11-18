@@ -73,7 +73,7 @@ const Login = () => {
           // Proceed to OTP verification
           setShowOTP(true);
           toast({
-            title: "Face verified",
+            title: "Email verified",
             description: "Please enter your authenticator code",
           });
         } else {
