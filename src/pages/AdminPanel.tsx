@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, UserX, Ban } from "lucide-react";
+import { ArrowLeft, UserX, Ban, Shield } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +18,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface UserData {
   id: string;
@@ -35,6 +42,7 @@ const AdminPanel = () => {
   const [users, setUsers] = useState<UserData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
     checkAdminAndFetchUsers();
@@ -48,6 +56,8 @@ const AdminPanel = () => {
         navigate("/login");
         return;
       }
+
+      setCurrentUser(user);
 
       // Check if user is admin
       const { data: roleData } = await supabase
@@ -177,6 +187,64 @@ const AdminPanel = () => {
     }
   };
 
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    try {
+      // Check if user has a role entry
+      const { data: existingRole } = await supabase
+        .from('user_roles')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!existingRole) {
+        // Create a new role entry
+        const { error: insertError } = await supabase
+          .from('user_roles')
+          .insert({
+            user_id: userId,
+            role: newRole as any,
+            status: 'active'
+          });
+
+        if (insertError) throw insertError;
+      } else {
+        // Update existing role
+        const { error: updateError } = await supabase
+          .from('user_roles')
+          .update({ role: newRole as any })
+          .eq('user_id', userId);
+
+        if (updateError) throw updateError;
+      }
+
+      await checkAdminAndFetchUsers();
+
+      // Log the action
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('audit_logs')
+          .insert({
+            user_id: user.id,
+            action: `Changed user role to ${newRole}`,
+            details: `User ${userId} role changed to ${newRole}`
+          });
+      }
+
+      toast({
+        title: "Success",
+        description: `User role updated to ${newRole}`,
+      });
+    } catch (error) {
+      console.error('Error updating role:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update user role.",
+        variant: "destructive"
+      });
+    }
+  };
+
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
       case 'admin': return 'destructive';
@@ -227,14 +295,15 @@ const AdminPanel = () => {
           <CardContent>
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Joined</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Joined</TableHead>
+                <TableHead>Assign Role</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
               </TableHeader>
               <TableBody>
                 {users.map((user) => (
@@ -255,6 +324,25 @@ const AdminPanel = () => {
                     </TableCell>
                     <TableCell>
                       {new Date(user.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      {currentUser?.id === user.user_id ? (
+                        <span className="text-sm text-muted-foreground">You</span>
+                      ) : (
+                        <Select
+                          value={user.role}
+                          onValueChange={(value) => handleRoleChange(user.user_id, value)}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="user">User</SelectItem>
+                            <SelectItem value="moderator">Moderator</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {user.role !== 'admin' && (
