@@ -68,37 +68,37 @@ const AdminPanel = () => {
 
       setIsAdmin(true);
 
-      // Fetch all user roles (with status column from migration)
+      // Fetch all profiles first (this will show ALL registered users)
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('user_id, email, full_name, created_at');
+
+      if (profilesError) throw profilesError;
+
+      // Fetch all user roles
       const { data: rolesData, error: rolesError } = await supabase
         .from('user_roles')
         .select('id, user_id, role, status, created_at');
 
       if (rolesError) throw rolesError;
 
-      // Fetch all profiles
-      const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles')
-        .select('user_id, email, full_name');
-
-      if (profilesError) throw profilesError;
-
-      // Create a map of profiles by user_id for quick lookup
-      const profilesMap: Record<string, any> = {};
-      profilesData?.forEach(profile => {
-        profilesMap[profile.user_id] = profile;
+      // Create a map of roles by user_id for quick lookup
+      const rolesMap: Record<string, any> = {};
+      rolesData?.forEach(roleItem => {
+        rolesMap[roleItem.user_id] = roleItem;
       });
 
-      // Combine the data
-      const formattedUsers = (rolesData as any)?.map((roleItem: any) => {
-        const profile = profilesMap[roleItem.user_id];
+      // Combine the data - show ALL profiles with their roles (if any)
+      const formattedUsers = profilesData?.map((profile: any) => {
+        const roleItem = rolesMap[profile.user_id];
         return {
-          id: roleItem.id,
-          user_id: roleItem.user_id,
-          email: profile?.email || 'N/A',
-          full_name: profile?.full_name || null,
-          role: roleItem.role,
-          status: roleItem.status || 'active',
-          created_at: roleItem.created_at
+          id: roleItem?.id || profile.user_id,
+          user_id: profile.user_id,
+          email: profile.email,
+          full_name: profile.full_name || null,
+          role: roleItem?.role || 'user',
+          status: roleItem?.status || 'active',
+          created_at: profile.created_at
         };
       }) || [];
 
@@ -117,12 +117,33 @@ const AdminPanel = () => {
 
   const handleStatusChange = async (userId: string, userRole: string, newStatus: string) => {
     try {
-      const { error } = await supabase
+      // Check if user has a role entry
+      const { data: existingRole } = await supabase
         .from('user_roles')
-        .update({ status: newStatus } as any)
-        .eq('user_id', userId);
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (error) throw error;
+      if (existingRole) {
+        // Update existing role
+        const { error } = await supabase
+          .from('user_roles')
+          .update({ status: newStatus } as any)
+          .eq('user_id', userId);
+
+        if (error) throw error;
+      } else {
+        // Create new role entry for users without one
+        const { error } = await supabase
+          .from('user_roles')
+          .insert({
+            user_id: userId,
+            role: userRole as any,
+            status: newStatus
+          });
+
+        if (error) throw error;
+      }
 
       const actionMessage = newStatus === 'active' 
         ? 'reactivated' 
