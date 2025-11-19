@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,12 +7,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { ArrowLeft, Shield, User, Bell, Lock, Camera, QrCode } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { generateTOTPSecret } from "@/lib/auth";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [smsNotifications, setSmsNotifications] = useState(false);
+  const [showFaceDialog, setShowFaceDialog] = useState(false);
+  const [showQRDialog, setShowQRDialog] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const handlePasswordChange = (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,18 +37,114 @@ const Settings = () => {
     });
   };
 
-  const handleFaceReset = () => {
-    toast({
-      title: "Face re-enrollment required",
-      description: "Please position your face in front of the camera.",
-    });
+  const handleFaceReset = async () => {
+    setShowFaceDialog(true);
+    setIsCapturing(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+    } catch (error) {
+      toast({
+        title: "Camera Error",
+        description: "Could not access camera. Please allow camera permissions.",
+        variant: "destructive"
+      });
+      setIsCapturing(false);
+      setShowFaceDialog(false);
+    }
   };
 
-  const handleAuthenticatorReset = () => {
-    toast({
-      title: "Authenticator reset",
-      description: "A new QR code has been generated. Please scan it with your app.",
-    });
+  const captureFace = async () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+        context.drawImage(videoRef.current, 0, 0);
+        
+        const imageData = canvasRef.current.toDataURL('image/jpeg');
+        
+        // Stop camera stream
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        
+        // Update face template
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { error } = await supabase
+            .from('auth_data')
+            .update({ 
+              face_template: imageData,
+              face_enrolled: true 
+            })
+            .eq('user_id', user.id);
+
+          if (error) {
+            toast({
+              title: "Error",
+              description: "Failed to update face data.",
+              variant: "destructive"
+            });
+          } else {
+            toast({
+              title: "Face re-enrolled",
+              description: "Your face has been updated successfully.",
+            });
+          }
+        }
+        
+        setShowFaceDialog(false);
+        setIsCapturing(false);
+      }
+    }
+  };
+
+  const handleAuthenticatorReset = async () => {
+    try {
+      const { data, error } = await generateTOTPSecret();
+      
+      if (error || !data) {
+        toast({
+          title: "Error",
+          description: "Failed to generate new authenticator secret.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      setQrCodeUrl(data.qrCodeUrl);
+      
+      // Update TOTP secret
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { error: updateError } = await supabase
+          .from('auth_data')
+          .update({ 
+            totp_secret: data.secret,
+            totp_verified: false 
+          })
+          .eq('user_id', user.id);
+
+        if (updateError) {
+          toast({
+            title: "Error",
+            description: "Failed to update authenticator.",
+            variant: "destructive"
+          });
+        } else {
+          setShowQRDialog(true);
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred.",
+        variant: "destructive"
+      });
+    }
   };
 
   return (
@@ -280,6 +391,57 @@ const Settings = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Face Re-enrollment Dialog */}
+      <Dialog open={showFaceDialog} onOpenChange={setShowFaceDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Re-enroll Face Recognition</DialogTitle>
+            <DialogDescription>
+              Position your face in the camera frame and click capture when ready.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
+              <video
+                ref={videoRef}
+                className="w-full h-full object-cover"
+                autoPlay
+                playsInline
+              />
+              <canvas ref={canvasRef} className="hidden" />
+            </div>
+            <Button onClick={captureFace} className="w-full" disabled={!isCapturing}>
+              <Camera className="h-4 w-4 mr-2" />
+              Capture Face
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* QR Code Dialog */}
+      <Dialog open={showQRDialog} onOpenChange={setShowQRDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Scan New QR Code</DialogTitle>
+            <DialogDescription>
+              Scan this QR code with Microsoft Authenticator to complete the reset.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center space-y-4">
+            {qrCodeUrl && (
+              <img
+                src={qrCodeUrl}
+                alt="QR Code"
+                className="w-64 h-64 border-2 border-border rounded-lg"
+              />
+            )}
+            <Button onClick={() => setShowQRDialog(false)} className="w-full">
+              Done
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
